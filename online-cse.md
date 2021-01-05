@@ -708,6 +708,7 @@ Prog A1 Z
    F2→Cont [z2] Continue Z Call f2;
 
    ...}
+```
 
 , storing two bits per
 branch node, so it does not change the complexity of `analyze`.
