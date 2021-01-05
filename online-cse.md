@@ -630,11 +630,39 @@ compute_out_edges avail pred succ out:
       return avail_out, bool_out
 ```
 
-Finally, we have to ...
+We use the freshly refined flow analysis to perform substitution as
+usual.  It may be that the renamed term itself is redundant; in that
+case its continuation may replace with a `Continue(Values)` term, which
+may itself be elided when visiting successors, causing control-flow
+graph simplifications as the once-through pass moves forward in
+reverse-post-order.
 
-Extend `propagate`, adding a case for terms with no predecessors:
+However, there is another interesting possibility, which is that branch
+terms may not fold where they are, but can fold at one or more
+predecessors: context-sensitive branch folding.  Therefore if the result
+of renaming is a branch, we check the `equiv` and `bool` maps for all
+immediate predecessors to see if any simplification is possible.  Such a
+simplification could cause the branch to become dead or even to allow
+the branch to fold in place: a situation that can be detected by
+re-running the online flow analysis pass.  Therefore if any branch
+predecessor is able to fold, we revisit the term from the top.
 
+Figure 19: Context-sensitive branch folding
 ```
+visit l args term out analysis:
+  case recompute(analysis, l, out) of
+    Analysis preds avail equiv subst bool:
+
+      ;;; FIXME: Here include the logic from
+      ;;; simplify-branch-predecessors: rename term, if a branch and no
+      ;;; args, try to fold predecessors; if any succeeds, tail-call
+      ;;; propagate(l, args, term', out', analysis').
+```
+
+Figure 20: Eager elision, part 2
+```
+;; Branch folding made this term unreachable.  Prune from
+;; preds set.
 propagate l args term out analysis:
   case analysis of
     Analysis preds avail equiv subst bool:
