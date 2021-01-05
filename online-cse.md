@@ -423,15 +423,16 @@ We compute `bool` as a bitvector flow analysis:
 
 Figure 14: Computing taken-branch analysis
 ```
+branch_taken conts pred l:
+  case conts[pred] of
+    Cont _ Branch =l =l t: 11
+    Cont _ Branch =l _  t: 01
+    Cont _ Branch _  =l t: 10
+    _:                     00
+
 compute_taken_branches conts preds:
-  branch pred l:
-    case conts[pred] of
-      Cont _ Branch =l =l t: 11
-      Cont _ Branch =l _  t: 01
-      Cont _ Branch _  =l t: 10
-      _:                     00
   let init = {for l→_ in conts:
-               l→∪([for p in preds[l]: {p→branch(pred, l)}])}
+               l→∪([for p in preds[l]: {p→branch_taken(conts, pred, l)}])}
   saturate bool:
     {for l→v in bool: l→(v ∪ ∪([for p in preds[l]: bool[p]]))}
   return fixpoint(saturate, init)
@@ -519,12 +520,12 @@ global CSE, online CSE has three extensions:
  2. Online flow analysis recalculation.  Branch folding can alter
     avail/bool sets, and it can also cause continuations to go from
     multiple to single predecessors, making more definitions available
-    for elimination.  Therefore we keep a predecessors map, and use it
-    in the once-through forward pass to recalculate flow analysis
+    for elimination.  Therefore we update the predecessors map as the
+    once-through forward pass proceeds to recalculate flow analysis
     locally at each node.  This recalculation can only increase the
-    precision of flow analysis.  Note also that we add equivalent
-    expressions when visiting continuations, not the predecessor, so
-    that such additions can happen after control-flow graph reductions.
+    precision of flow analysis.  Note also that as we add equivalent
+    expressions when visiting continuations, not the predecessor, such
+    additions can happen after control-flow graph reductions.
 
  3. Eager elision.  Instead of leaving "useless" conts in the flow graph
     for dead-code elimination to clean up later, online CSE elides these
@@ -548,6 +549,7 @@ To implement eager elision, we add a case to `propagate` to remove
 so from the successor, so that folding can expose more of this kind of
 definition.
 
+Figure 17: Eager elision
 ```
 propagate l args term out analysis:
   case analysis of
@@ -559,8 +561,8 @@ propagate l args term out analysis:
               subst ← subst + {for var,arg in vars,args: var→arg}
               analysis ← Analysis(preds, avail, equiv, subst, bool)
               case elide_predecessor(label, pred, out, analysis) of
-                (): visit l args term out analysis
-                (out, analysis): visit l args' term out analysis
+                (): visit(l, args, term, out, analysis)
+                (out, analysis): visit(l, args', term, out, analysis)
             ...
         ...
 
@@ -573,7 +575,7 @@ elide_predecessor label pred out analysis:
         if pred_pred not in out:
           return ()
         out ← out / {pred_pred→forward(out[pred_pred], pred, label)}
-      preds ← preds / {label→(preds[label] - {pred} union preds[pred])}
+      preds ← preds / {label→((preds[label] - {pred}) ∪ preds[pred])}
       return (out, Analysis(preds, avail, equiv, subst, bool))
 
 forward cont old new;
@@ -595,6 +597,7 @@ recompute the flow analysis from the immediate predecessors of the cont
 being visited.  This refines the analysis precisely in the forward
 direction, while continuing to treat back-edges conservatively.
 
+Figure 18: Online flow analysis recalculation
 ```
 visit l args term out analysis:
   case recompute(analysis, l, out) of
@@ -604,27 +607,30 @@ visit l args term out analysis:
 recompute analysis l out:
   case analysis of
     Analysis preds avail equiv subst bool:
-      let avail_in = []
-      let rec meet_again labels avail_in bool_in:
+      meet_again labels avail_in bool_in:
         case labels of
           {}: return (avail_in, bool_in)
           {pred} + labels:
             case compute_out_edges(avail, pred, l, out) of:
               (avail_in', bool_in'):
                 return meet_again(labels,
-                                  avail_in' isect avail_in,
-                                  bool_in' union bool_in')
+                                  avail_in' ∩ avail_in,
+                                  bool_in' ∪ bool_in')
       case meet_again(preds[l], [], {}, []) of
         (avail_in, bool_in):
           let avail = avail / {l→avail_in}
           let bool = bool / {l→bool_in}
           return Analysis(preds, avail, equiv, subst, bool)
 
-compute_out_edges(avail 
+compute_out_edges avail pred succ out:
+  case analysis of
+    Analysis preds avail equiv subst bool:
+      let avail_out = avail[pred] + {pred}
+      let bool_out = bool[pred] + branch_taken(out, pred, succ)
+      return avail_out, bool_out
 ```
 
-The new recom
-Relative to 
+Finally, we have to ...
 
 Extend `propagate`, adding a case for terms with no predecessors:
 
