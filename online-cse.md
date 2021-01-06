@@ -786,7 +786,18 @@ no speed change for gabriel benchmarks
 
 guile compiling-itself benchmark
 
-another matcher: llvm global isel
+## SSA discussion
+
+Merits of CPS soup versus SSA...
+
+## Junk bin of things that might be good to mention.
+
+LLVM has a few pieces of code that makes matchers of the kind this paper
+talks about; [global instruction selection has
+one](https://github.com/llvm/llvm-project/blob/581d13f8aeb66c040d5ea69ad4385f766e1f97c9/llvm/include/llvm/CodeGen/GlobalISel/MIPatternMatch.h).
+
+Basically this occurs whenever you have expressive pattern matching
+facilities embedded in a language instead of being a primitive as in ML.
 
 ## Related work
 
