@@ -68,7 +68,9 @@ elimination" algorithm as an effective single-pass solution.
 
 ## Key Contributions
 
-*FIXME: Not sure how bold to be regarding tone here.  Normally I would be more circumspect but I understand that reviewers appreciate clues about what authors think their paper is about.*
+*FIXME: Not sure how bold to be regarding tone here.  Normally I would
+be more circumspect but I understand that reviewers appreciate clues
+about what authors think their paper is about.*
 
 A new intermediate language for optimizing compilers, "CPS soup",
 presenting distinct advantages in terms of minimalism and expressiveness
