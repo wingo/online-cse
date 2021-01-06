@@ -5,7 +5,7 @@
 ## Introduction
 
 Consider the straightforward compilation of a boxes-of-boxes-of-integers
-pattern-matching idiom into a decision tree:
+pattern-matching idiom into a decision tree, in figure 1.
 
 Figure 1:
 ```
@@ -16,7 +16,9 @@ match x
   Box (Box n): f_n()
 ```
     
-We might expect an optimizing compiler to receive an input term like:
+We might expect a simple compiler front-end to residualize a program
+like the one in figure 2: a chain of if/then/else-if statements where
+each test is a similar logical conjunction.
 
 Figure 2:
 ```
@@ -26,7 +28,9 @@ else if Box? x and Box? (y_2:=Unbox x) and Equal? (Unbox y_2) 2: f_2()
 else if Box? x and Box? (y_n:=Unbox x) and Equal? (Unbox y_n) n: f_n()
 ```
 
-And then we might expect the optimizer to reduce the program to:
+We would then hope that this optimizer transforms the program of figure
+2 into something like figure 3, hoisting the repeated comparisons to the
+top of the program.
 
 Figure 3:
 ```
@@ -39,7 +43,7 @@ if Box? x and Box? (y := Unbox x):
 ```
 
 Finally, we would expect the inner chain of `if` statements to reduce to
-a table switch:
+the table switch of figure 4.
 
 Figure 4:
 ```
@@ -52,15 +56,15 @@ if Box? x and Box? (y := Unbox x):
     n: f_n()
 ```
 
-However, that's not what happens.  Neither GCC nor LLVM convert (2) to
-(3).  Why not?  What algorithm is missing?  This paper analyses the
-decision tree reduction problem.  Guided by an instinct that the
-solution is related to common subexpression elimination (CSE), we first
-express the CSE algorithm in terms of a novel "CPS soup" program
-representation.  Using this representation, we show why standard code
-motion techniques fail to apply.  We then proceed to define an "online
-common subexpression elimination" algorithm as an effective single-pass
-solution.
+However, that's not what happens.  Neither GCC nor LLVM convert the
+program of figure 2 to the equivalent program of figure 3.  Why not?
+What algorithm is missing?  This paper analyses the decision tree
+reduction problem.  Guided by an instinct that the solution is related
+to common subexpression elimination (CSE), we first express the CSE
+algorithm in terms of a novel "CPS soup" program representation.  Using
+this representation, we show why standard code motion techniques fail to
+apply.  We then proceed to define an "online common subexpression
+elimination" algorithm as an effective single-pass solution.
 
 ## Key Contributions
 
