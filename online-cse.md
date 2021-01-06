@@ -299,14 +299,15 @@ propagate l args term out analysis:
 visit l args term out analysis:
   case analysis of
     Analysis preds avail equiv subst:
-      // Rename variable uses as appropriate, then potentially eliminate
-      // the redundant expression.
-      let term = case rename(term, subst) of
-                   Continue k exp:
-                     case equiv[exp] ∩ avail[l] of
-                       {}: Continue(k, exp0)
-                       {_→vars; ...}: Continue(k, Values(vars))
-                   term: term
+      // Rename variable uses as appropriate
+      term ← rename(term, subst)
+      // If the expression is redundant, eliminate it.
+      term ← case rename(term, subst) of
+               Continue k exp:
+                 case equiv[exp] ∩ avail[l] of
+                   {}: Continue(k, exp0)
+                   {_→vars; ...}: Continue(k, Values(vars))
+               term: term
       let cont = Cont(args, term)
       return (out + {l→cont}), analysis
 
@@ -445,21 +446,27 @@ We extend `visit`, adding a case for branches:
 
 Figure 15: Extension to `visit`, adding branch folding
 ```
+// Return (taken, not-taken), or () if can't fold.
+fold_branch l kf kt test equiv avail bool:
+  for pred→vals in (equiv[test] ∩ avail[l]):
+    case bool[l][pred] of:
+      01: return (kf, kt)
+      10: return (kt, kf)
+      _: _ // Keep looking.
+  return ()
+
 visit l args term out analysis:
   case analysis of
     Analysis preds avail equiv subst bool:
-      let term = case rename(term, subst) of
-                   Branch kf kt test:
-                     retry equiv:
-                       case equiv of
-                         {}: Branch(kf, kt, test)
-                         {_→[]; equiv}:
-                           case bool[l][pred] of:
-                             01: Continue(kf, Values([]))
-                             10: Continue(kt, Values([]))
-                             _: retry(equiv)
-                     retry(equiv[test] ∩ avail[l])
-                   ...
+      term ← rename(term, subst)
+      term ← case term of
+               Branch kf kt test:
+                 case fold_branch(l, kf, kt, test, equiv,
+                                  avail[l], bool[l]) of
+                   (): term
+                   (taken, not_taken): Continue(taken, Values([]))
+               ...
+      ...
 ```
 
 However, re-running the newly extended CSE doesn't help in this case:
@@ -471,19 +478,19 @@ or by the true branch (C1 and E1).
 At this point we are starting to see the shape of the solution.  The
 branch at A2 can't fold at label A2, but it can fold at each of its
 predecessors.  Consider the original terms A1, C1, and E1 from figure
-15.  The predecessor of A2 at A1 can continue directly to A2's false
+16.  The predecessor of A2 at A1 can continue directly to A2's false
 branch target, and the predecessors at C1 and E1 can continue to A2's
-true target, resulting in the new terms of figure 16.  A2 is left
+true target, resulting in the new terms of figure 17.  A2 is left
 unreachable and can be pruned.
 
-Figure 15: Original predecessors of A2
+Figure 16: Original predecessors of A2
 ```
   A1→Cont [x] Branch A2 B1 Box? x;
   C1→Cont [y1] Branch A2 D1 Box? y1;
   E1→Cont [z1] Branch A2 F1 Equal? z1 1;
 ```
 
-Figure 16: Predecessors of A2, after context-sensitive branch-folding
+Figure 17: Predecessors of A2, after context-sensitive branch-folding
 ```
   A1→Cont [x] Branch A3 B1 Box? x;
   C1→Cont [y1] Branch B2 D1 Box? y1;
@@ -544,12 +551,12 @@ operands to their canonical definitions.  The administrative eager
 elisions make foldable branches more easily detectable, which may of
 course lead to more elidable definitions.
 
-To implement eager elision, we add a case to `propagate` to remove
-`Values` expr that is the sole predecessor of its continuation.  We do
-so from the successor, so that folding can expose more of this kind of
-definition.
+To implement eager elision, in figure 18 we add a case to `propagate` to
+remove `Values` expr that is the sole predecessor of its continuation.
+We do so from the successor, so that folding can expose more of this
+kind of definition.
 
-Figure 17: Eager elision
+Figure 18: Eager elision
 ```
 propagate l args term out analysis:
   case analysis of
@@ -566,6 +573,13 @@ propagate l args term out analysis:
             ...
         ...
 
+prune_edge preds pred succ:
+  return preds / {succ→(preds[succ] - {pred})}
+add_edge preds pred succ
+  return preds / {succ→(preds[succ] ∪ {pred})}
+forward_edge preds pred old new
+  return add_edge(prune_edge(preds, pred, old), pred, new)
+
 elide_predecessor label pred out analysis:
   case analysis of
     Analysis preds avail equiv subst bool:
@@ -575,7 +589,8 @@ elide_predecessor label pred out analysis:
         if pred_pred not in out:
           return ()
         out ← out / {pred_pred→forward(out[pred_pred], pred, label)}
-      preds ← preds / {label→((preds[label] - {pred}) ∪ preds[pred])}
+        preds ← forward_edge(preds, pred_pred, pred, label)
+      preds ← prune_edge(preds, pred, label)
       return (out, Analysis(preds, avail, equiv, subst, bool))
 
 forward cont old new;
@@ -592,12 +607,13 @@ This transformation removes the bindings for `args` in the successor,
 which is sound as the args are substituted.  In that case the reified
 cont will declare the predecessor's `args` formals instead.
 
-To implement online flow analysis recalculation, at each `visit` we will
-recompute the flow analysis from the immediate predecessors of the cont
-being visited.  This refines the analysis precisely in the forward
-direction, while continuing to treat back-edges conservatively.
+We implement online flow analysis recalculation in figure 19.  At each
+`visit` we will recompute the flow analysis from the immediate
+predecessors of the cont being visited.  This refines the analysis
+precisely in the forward direction, while continuing to treat back-edges
+conservatively.
 
-Figure 18: Online flow analysis recalculation
+Figure 19: Online flow analysis recalculation
 ```
 visit l args term out analysis:
   case recompute(analysis, l, out) of
@@ -611,16 +627,14 @@ recompute analysis l out:
         case labels of
           {}: return (avail_in, bool_in)
           {pred} + labels:
-            case compute_out_edges(avail, pred, l, out) of:
-              (avail_in', bool_in'):
-                return meet_again(labels,
-                                  avail_in' ∩ avail_in,
-                                  bool_in' ∪ bool_in')
-      case meet_again(preds[l], [], {}, []) of
-        (avail_in, bool_in):
-          let avail = avail / {l→avail_in}
-          let bool = bool / {l→bool_in}
-          return Analysis(preds, avail, equiv, subst, bool)
+            let avail_in', bool_in' = compute_out_edges(avail, pred, l, out)
+            return meet_again(labels,
+                              avail_in' ∩ avail_in,
+                              bool_in' ∪ bool_in')
+      let avail_in, bool_in = meet_again(preds[l], [], {}, [])
+      let avail = avail / {l→avail_in}
+      let bool = bool / {l→bool_in}
+      return Analysis(preds, avail, equiv, subst, bool)
 
 compute_out_edges avail pred succ out:
   case analysis of
@@ -632,130 +646,131 @@ compute_out_edges avail pred succ out:
 
 We use the freshly refined flow analysis to perform substitution as
 usual.  It may be that the renamed term itself is redundant; in that
-case its continuation may replace with a `Continue(Values)` term, which
-may itself be elided when visiting successors, causing control-flow
-graph simplifications as the once-through pass moves forward in
-reverse-post-order.
+case its continuation may replace with a `Continue(k, Values)` term,
+which may itself be elided when visiting successors, causing
+control-flow graph simplifications as the once-through pass moves
+forward in reverse-post-order.
 
 However, there is another interesting possibility, which is that branch
 terms may not fold where they are, but can fold at one or more
 predecessors: context-sensitive branch folding.  Therefore if the result
-of renaming is a branch, we check the `equiv` and `bool` maps for all
-immediate predecessors to see if any simplification is possible.  Such a
-simplification could cause the branch to become dead or even to allow
-the branch to fold in place: a situation that can be detected by
-re-running the online flow analysis pass.  Therefore if any branch
-predecessor is able to fold, we revisit the term from the top.
+of renaming is a branch, in figure 20 we check the `equiv` and `bool`
+maps for all immediate predecessors to see if any simplification is
+possible.  Such a simplification could cause the branch to become dead
+or even to allow the branch to fold in place: a situation that can be
+detected by re-running the online flow analysis pass.  Therefore if any
+branch predecessor is able to fold, we revisit the term from the top.
 
-Figure 19: Context-sensitive branch folding
+Context-sensitive branch folding actually happens before redundant
+expressions are eliminated.  In this way, any predecessor of a branch
+that can fold continues directly a the new successor, without bouncing
+through the cont being visited.  This allows the cont being visited to
+become dead if it has no more predecessors, and also better enables
+further context-sensitive folding at successors.
+
+Figure 20: Context-sensitive branch folding
 ```
 visit l args term out analysis:
   case recompute(analysis, l, out) of
     Analysis preds avail equiv subst bool:
+      term ← rename(term, subst)
+      case fold_predecessor_branches(l, args, term, out, analysis) of
+        (out, analysis):
+          // Context-sensitive branch folding occurred, so predecessors
+          // have changed; revisit this cont with a newly refined flow
+          // analysis.
+          return propagate(l, args, term, out, analysis)
+        (): ()
+      term ← case term of ...
+      ...
 
-      ;;; FIXME: Here include the logic from
-      ;;; simplify-branch-predecessors: rename term, if a branch and no
-      ;;; args, try to fold predecessors; if any succeeds, tail-call
-      ;;; propagate(l, args, term', out', analysis').
+fold_predecessor_branches l args term out analysis:
+  // We can fold predecessors of Cont [] Branch.  If the term isn't a
+  // branch, no folding.  More subtly, as folding predecessors will
+  // retarget them to conts that bind no variables, we can only do that
+  // if the current cont has compatible arity.
+  case (args, term) of
+    ([], Branch kf kt test):
+      case analysis of
+        Analysis preds avail equiv subst bool:
+          let changed = False
+          for pred in preds[l]:
+            if pred <= l: continue
+            let avail_out, bool_out = compute_out_edges(avail, pred, l, out)
+            case fold_branch(l, kf, kt, test, equiv, avail_out, bool_out) of
+              (): continue
+              (taken, not_taken): 
+                changed ← True
+                out ← out / {pred→forward(out[pred], l, taken)}
+                preds ← forward_edge(preds, pred, l, taken)
+          case changed of
+            True: return out, Analysis(preds, avail, equiv, subst, bool)
+            False: return ()
+    _:
+      return ()
 ```
 
-Figure 20: Eager elision, part 2
+Finally, we need to revisit the simple branch folding that we added
+earlier in figure 15.  In most cases, context-sensitive branch folding
+subsumes our earlier branch folding; the branch will be left
+unreachable.  In that case it should be pruned from the graph, so as to
+make flow analysis refinement for successors more precise; figure 21 has
+this extension.  However in the case that only some predecessors can
+fold, or in the case where no predecessor can fold due to a non-empty
+bound variable set in the branch's cont, our earlier form of branch
+folding may still be possible.  In that case, we should take care to
+update the predecessors map.  Figure 21 implements these simple CFG
+cleanups.
+
+Figure 21: CFG cleanup: dead cont removal
 ```
-;; Branch folding made this term unreachable.  Prune from
-;; preds set.
 propagate l args term out analysis:
   case analysis of
     Analysis preds avail equiv subst bool:
       case preds[l] of
-        {}: return out, prune_successors(analysis, l, successors(term))
+        // A term with no predecessors was made unreachable by branch
+        // folding.  Prune it from the CFG.
+        {}: return out, prune_successors(analysis, l, term)
         ...
 
-prune_successors analysis label succs:
-  for succ of succs:
-    analysis ← prune_branch(analysis, label, succ)
-  return analysis
+successors term:
+  case term of
+    Continue k _: return {k}
+    Branch kf kt _: return {kf;kt}
 
-prune_branch analysis label succ:
+prune_successors analysis label term:
   case analysis of
     Analysis preds avail equiv subst bool:
-      return Analysis(preds - {succ→{label}}, avail, equiv, subst, bool)
+      for succ of successors(term):
+        preds ← prune_edge(preds, label, succ)
+      return Analysis(preds, avail, equiv, subst, bool)
 ```
 
-We not only ignore the unreachable term, but we also remove it as a
-predecessor for its successors, which may enable further folding.
-
-`prune_successors` is 
-
-This case handles terms made unreachable by branch folding.  
-
-;; Branch
-folding made this term unreachable.  Prune from ;; preds set.
-
-may only be
-possible as updated flow analysis
-
-some branches may only fold
-after their operands have been renamed, which needs 
-
-
-would not happen without fl
-
- is useful only a
-minimally useful without 
-
-  context-sensitive branch
-
-Together, context-sensitive branch folding and online recomputation of
-flow analysis are the two elements of Online CSE, a new optimization
-pass.
-
-[fill in algo here]
-
- two points are the core of "online
-
-it does dominate B2 in the
-residual program.
-
-we would like to see it as redundant to A2.
-
-
+Figure 22: CFG cleanup: dead branch removal
 ```
-Prog A1 Z
-  {A1→Cont [x] Branch A2 B1 Box? x;
-   B1→Cont [] Continue C1 Unbox x;
-   C1→Cont [y1] Branch A2 D1 Box? y1;
-   D1→Cont [] Continue E1 Unbox y1;
-   E1→Cont [z1] Branch A2 F1 Equal? z1 1;
-   F1→Cont [] Continue Z Call f1;
-
-   A2→Cont [] Branch A3 B2 Box? x;
-   B2→Cont [] Continue C2 Unbox x;
-   C2→Cont [y2] Branch A3 D2 Box? y2;
-   D2→Cont [] Continue E2 Unbox y2;
-   E2→Cont [z2] Branch A3 F2 Equal? z2 2;
-   F2→Cont [z2] Continue Z Call f2;
-
-   ...}
+visit l args term out analysis:
+  case analysis of
+    Analysis preds avail equiv subst bool:
+      term ← rename(term, subst)
+      case term of
+        Branch kf kt test:
+          case fold_branch(l, kf, kt, test, equiv,
+                           avail[l], bool[l]) of
+            (): ()
+            (taken, not_taken):
+              term ← Continue(taken, Values([]))
+              preds ← prune_edge(preds, label, not_taken)
+              analysis ← Analysis(preds, avail, equiv, subst, bool)
+        ...
+      ...
 ```
 
-, storing two bits per
-branch node, so it does not change the complexity of `analyze`.
-
-
-
-...
-
-Analysis := preds * avail * equiv * 
-
-, therefore, is to reduce the
-branch at A2 somehow.  Fortunately we can take a simple first-order
-approach.  Note that A2 is a branch target, and that branch targets bind
-no variables, and that therefore if its branch would fold at its
-predecessors, the targets of the fold (A3 or B2) have compatible arity
-with A1; therefore we can simply replace the targets of the branch's
-predecessors, if they fold.
-
-another matcher: llvm global isel
+Though online CSE may seem a bit verbose to implement, GNU Guile's
+production implementation of this algorithm is only around 800 lines of
+code including comments and whitespace, operating on a richer
+intermediate language.  It also includes a number of other facilities
+(sparse constant propagation, impure instructions, synthetic auxiliary
+definitions).
 
 ## Benchmarks
 
@@ -766,6 +781,8 @@ gabriel benchmark code size changes?
 no speed change for gabriel benchmarks
 
 guile compiling-itself benchmark
+
+another matcher: llvm global isel
 
 ## Related work
 
