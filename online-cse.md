@@ -94,7 +94,7 @@ We begin by defining a novel first-order continuation-passing-style
 program representation to use in solving the problem, "CPS soup", in
 figure 5.
 
-;; FIXME: this is sloppy!
+*FIXME: this is sloppy!*
 
 Figure 5:
 ```
@@ -364,8 +364,8 @@ reducible, and it seems that practical bounds are enough to consider
 this algorithm as O(n log n) for the purposes of deciding whether to
 include it in a production compiler.
 
-FIXME: show experimental results, as some of the arguments are based on
-"in-practice" heuristics.
+*FIXME: show experimental results, as some of the arguments are based on
+"in-practice" heuristics.*
 
 ## Revisiting the decision tree reduction problem
 
