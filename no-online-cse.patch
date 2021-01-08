@@ -1,0 +1,214 @@
+diff -ur guile-src-online-cse/module/language/cps/cse.scm guile-src-no-online-cse/module/language/cps/cse.scm
+--- guile-src-online-cse/module/language/cps/cse.scm	2020-08-25 23:29:23.000000000 +0200
++++ guile-src-no-online-cse/module/language/cps/cse.scm	2021-01-08 15:24:58.873852106 +0100
+@@ -247,99 +247,6 @@
+   (truthy-labels analysis-truthy-labels)
+   (consts analysis-consts))
+ 
+-;; When we determine that we can replace an expression with
+-;; already-bound variables, we change the expression to a $values.  At
+-;; its continuation, if it turns out that the $values expression is the
+-;; only predecessor, we elide the predecessor, to make redundant branch
+-;; folding easier.  Ideally, elision results in redundant branches
+-;; having multiple predecessors which already have values for the
+-;; branch.
+-;;
+-;; We could avoid elision, and instead search backwards when we get to a
+-;; branch that we'd like to elide.  However it's gnarly: branch elisions
+-;; reconfigure the control-flow graph, and thus affect the avail /
+-;; truthy maps.  If we forwarded such a distant predecessor, if there
+-;; were no intermediate definitions, we'd have to replay the flow
+-;; analysis from far away.  Maybe it's possible but it's not obvious.
+-;;
+-;; The elision mechanism is to rewrite predecessors to continue to the
+-;; successor.  We could have instead replaced the predecessor with the
+-;; body of the successor, but that would invalidate the values of the
+-;; avail / truthy maps, as well as the clobber sets.
+-;;
+-;; We can't always elide the predecessor though.  If any of the
+-;; predecessor's predecessors is a back-edge, it hasn't been
+-;; residualized yet and so we can't rewrite it.  This is an
+-;; implementation limitation.
+-;;
+-(define (forward-cont cont from to)
+-  (define (rename k) (if (eqv? k from) to k))
+-  (rewrite-cont cont
+-    (($ $kargs names vals ($ $continue k src exp))
+-     ($kargs names vals ($continue (rename k) src ,exp)))
+-    (($ $kargs names vals ($ $branch kf kt src op param args))
+-     ($kargs names vals ($branch (rename kf) (rename kt) src op param args)))
+-    (($ $kargs names vals ($ $switch kf kt* src arg))
+-     ($kargs names vals ($switch (rename kf) (map rename kt*) src arg)))
+-    (($ $kargs names vals ($ $prompt k kh src escape? tag))
+-     ($kargs names vals ($prompt (rename k) (rename kh) src escape? tag)))
+-    (($ $kreceive ($ $arity req () rest () #f) kbody)
+-     ($kreceive req rest (rename kbody)))
+-    (($ $kclause arity kbody kalternate)
+-     ;; Can only be a body continuation.
+-     ($kclause ,arity (rename kbody) kalternate))))
+-
+-(define (elide-predecessor label pred out analysis)
+-  (match analysis
+-    (($ <analysis> effects clobbers preds avail truthy-labels consts)
+-     (let ((pred-preds (intmap-ref preds pred)))
+-       (and
+-        ;; Don't elide predecessors that are the targets of back-edges.
+-        (< (intset-prev pred-preds) pred)
+-        (cons
+-         (intset-fold
+-          (lambda (pred-pred out)
+-            (define (rename k) (if (eqv? k pred) label k))
+-            (intmap-replace!
+-             out pred-pred
+-             (forward-cont (intmap-ref out pred-pred) pred label)))
+-          pred-preds
+-          (intmap-remove out pred))
+-         (make-analysis effects
+-                        clobbers
+-                        (intmap-add (intmap-add preds label pred intset-remove)
+-                                    label pred-preds intset-union)
+-                        avail
+-                        truthy-labels
+-                        consts)))))))
+-
+-(define (prune-branch analysis pred succ)
+-  (match analysis
+-    (($ <analysis> effects clobbers preds avail truthy-labels consts)
+-     (make-analysis effects
+-                    clobbers
+-                    (intmap-add preds succ pred intset-remove)
+-                    avail
+-                    truthy-labels
+-                    consts))))
+-
+-(define (forward-branch analysis pred old-succ new-succ)
+-  (match analysis
+-    (($ <analysis> effects clobbers preds avail truthy-labels consts)
+-     (make-analysis effects
+-                    clobbers
+-                    (let ((preds (intmap-add preds old-succ pred
+-                                             intset-remove)))
+-                      (intmap-add preds new-succ pred intset-add))
+-                    avail
+-                    truthy-labels
+-                    consts))))
+-
+-(define (prune-successors analysis pred succs)
+-  (intset-fold (lambda (succ analysis)
+-                 (prune-branch analysis pred succ))
+-               succs analysis))
+-
+ (define (compute-out-edges analysis pred succ out)
+   (match analysis
+     (($ <analysis> effects clobbers preds avail truthy-labels consts)
+@@ -579,46 +486,6 @@
+             (equiv
+              (forward (intmap-ref equiv (intmap-next equiv))))))))))
+ 
+-  (define (maybe-forward-branch-predecessor label pred key kf kt out analysis)
+-    (cond
+-     ((<= label pred)
+-      ;; A backwards branch; punt.
+-      (values out analysis))
+-     (else
+-      (call-with-values (lambda ()
+-                          (compute-out-edges analysis pred label out))
+-        (lambda (pred-avail pred-bool pred-consts)
+-          (match (fold-branch equivalent-expressions key kf kt
+-                              pred-avail pred-bool pred-consts)
+-            (#(taken not-taken)
+-             (values (intmap-replace!
+-                      out pred
+-                      (forward-cont (intmap-ref out pred) label taken))
+-                     (forward-branch analysis pred label taken)))
+-            (#f
+-             (values out analysis))))))))
+-
+-  (define (simplify-branch-predecessors label term out analysis)
+-    ;; if any predecessor's truthy-edge folds the branch, forward the
+-    ;; precedecessor.  may cause branch to become dead, or cause
+-    ;; remaining predecessor to eliminate.
+-    (match term
+-      (($ $branch kf kt)
+-       (let ((key (compute-branch-key term)))
+-         (match analysis
+-           (($ <analysis> effects clobbers preds avail truthy-labels consts)
+-            (call-with-values
+-                (lambda ()
+-                  (intset-fold
+-                   (lambda (pred out analysis)
+-                     (maybe-forward-branch-predecessor label pred
+-                                                       key kf kt out analysis))
+-                   (intmap-ref preds label) out analysis))
+-              (lambda (out* analysis*)
+-                (if (eq? analysis analysis*)
+-                    #f
+-                    (cons out* analysis*))))))))))
+-
+   (define (visit-branch label term analysis)
+     (match term
+       (($ $branch kf kt src)
+@@ -632,7 +499,7 @@
+                                 consts)
+               (#(taken not-taken)
+                (values (build-term ($continue taken src ($values ())))
+-                       (prune-branch analysis label not-taken)))
++                       analysis))
+               (#f
+                (values term analysis)))))))))
+ 
+@@ -643,20 +510,13 @@
+         (($ $branch)
+          ;; Can only forward predecessors if this continuation binds no
+          ;; values.
+-         (match (and (null? vars)
+-                     (simplify-branch-predecessors label term out analysis))
+-           (#f
+-            (call-with-values (lambda ()
+-                                (visit-branch label term analysis))
+-              (lambda (term analysis)
+-                (values (intmap-add! out label
+-                                     (build-cont ($kargs names vars ,term)))
+-                        substs
+-                        analysis))))
+-           ((out . analysis)
+-            ;; Recurse.
+-            (visit-label label (build-cont ($kargs names vars ,term))
+-                         out substs analysis))))
++         (call-with-values (lambda ()
++                             (visit-branch label term analysis))
++           (lambda (term analysis)
++             (values (intmap-add! out label
++                                  (build-cont ($kargs names vars ,term)))
++                     substs
++                     analysis))))
+         (($ $continue k src exp)
+          (values (intmap-add! out label
+                               (build-cont
+@@ -679,11 +539,6 @@
+          (($ <analysis> effects clobbers preds avail truthy-labels consts)
+           (let ((preds (intmap-ref preds label)))
+             (cond
+-             ((eq? preds empty-intset)
+-              ;; Branch folding made this term unreachable.  Prune from
+-              ;; preds set.
+-              (values out substs
+-                      (prune-successors analysis label (term-successors term))))
+              ((trivial-intset preds)
+               => (lambda (pred)
+                    (match (and (< pred label) (intmap-ref out pred))
+@@ -697,13 +552,7 @@
+                       (let ((substs (fold (lambda (var val substs)
+                                             (intmap-add substs var val))
+                                           substs vars vals)))
+-                        (match (elide-predecessor label pred out analysis)
+-                          (#f
+-                           ;; Can't elide; predecessor must be target of
+-                           ;; backwards branch.
+-                           (visit-term label names vars term out substs analysis))
+-                          ((out . analysis)
+-                           (visit-term label names' vars' term out substs analysis)))))
++                        (visit-term label names vars term out substs analysis)))
+                      (($ $kargs _ _ term)
+                       (match (compute-term-key term)
+                         (#f #f)

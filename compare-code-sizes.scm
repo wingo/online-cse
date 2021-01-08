@@ -1,0 +1,63 @@
+(use-modules (ice-9 match)
+             (srfi srfi-1)
+             (ice-9 ftw)
+             (ice-9 format)
+             (ice-9 binary-ports)
+             (system vm elf))
+
+(define (find-files-with-suffix dir suffix)
+  (define (visit* prefix entries)
+    (append-map (lambda (entry) (visit prefix entry)) entries))
+  (define (visit prefix entry)
+    (match entry
+      ((name stat children ...)         ; directory
+       (let ((tail (visit* (in-vicinity prefix name) children)))
+         (if (string-suffix? suffix name)
+             (cons (in-vicinity prefix name) tail)
+             tail)))))
+  (visit (dirname dir) (file-system-tree dir)))
+
+(define (code-size go-file)
+  (let* ((bv (call-with-input-file go-file get-bytevector-all))
+         (elf (parse-elf bv))
+         (section (elf-section-by-name elf ".rtl-text")))
+    (elf-section-size section)))
+
+(define (compute-code-sizes dir)
+  (map (lambda (name)
+         (cons name (code-size name)))
+       (sort (find-files-with-suffix dir ".go")
+             string<?)))
+
+(define (compare-code-sizes dir1 dir2)
+  (define (strip-dir dir s)
+    (unless (string-prefix? (string-append dir "/") s)
+      (error "unexpected name" s dir))
+    (substring s (1+ (string-length dir))))
+  (let lp ((a (compute-code-sizes dir1))
+           (b (compute-code-sizes dir2)))
+    (match (vector a b)
+      (#(() ()) '())
+      (#(((a-name . a-size) . a) ((b-name . b-size) . b))
+       (let ((name (strip-dir dir1 a-name)))
+         (unless (equal? name (strip-dir dir2 b-name))
+           (error "names did not match" a-name b-name))
+         (cons (vector name a-size b-size (/ b-size a-size 1.0))
+               (lp a b)))))))
+
+(define (code-size-ratios dir1 dir2)
+  (sort (compare-code-sizes dir1 dir2)
+        (match-lambda*
+         ((#(_ _ _ ratio1) #(_ _ _ ratio2)) (< ratio1 ratio2)))))
+
+(when (batch-mode?)
+  (match (program-arguments)
+    ((_ old new)
+     (for-each (match-lambda
+                (#(name old new ratio)
+                 (format #t "~A,~A,~A\n" name ratio (- new old))))
+               (code-size-ratios old new)))
+    ((script . _)
+     (format (current-error-port) "usage: ~A BEFORE-DIR AFTER-DIR\n"
+             script)
+     (exit 1))))

@@ -24,3 +24,5 @@
  - [ ] Convert to latex
 
 (If you are reading this, collaborators welcome)
+
+For each function present in both

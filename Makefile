@@ -15,10 +15,12 @@ guile-src-%: guile-3.0.5.tar.lz
 
 guile-bin-%: guile-src-%
 	$(ENV) bash -c 'cd $< && ./configure'
-	$(ENV) make -C $< $(J)
+	$(ENV) make -C $< $(MAKEFLAGS)
+	$(ENV) rm -f $@
 	$(ENV) ln -s $</meta/guile $@
 
-foo:
-	$(GUIX) build guile
+code-size-comparison.csv: guile-bin-no-online-cse guile-bin-online-cse compare-code-sizes.scm
+	$(ENV) ./guile-bin-online-cse compare-code-sizes.scm \
+	   guile-src-no-online-cse/module guile-src-online-cse/module > $@
 
-.PHONY: foo
+.PRECIOUS: guile-src-% guile-bin-%
