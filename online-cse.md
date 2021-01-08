@@ -776,15 +776,39 @@ intermediate language.  It also includes a number of other facilities
 (sparse constant propagation, impure instructions, synthetic auxiliary
 definitions).
 
-## Benchmarks
+## Evaluation
 
-number of code bytes before and after for guile
+### Complexity of CSE in CPS soup
 
-gabriel benchmark code size changes?
+Translate the algorithm above into a bare-bones impl; apply it to
+programs like the one in the intro, of various sizes.  Measure time.
 
-no speed change for gabriel benchmarks
+### Number of code bytes before and after for guile
 
-guile compiling-itself benchmark
+If the optimization succeeds, code will become dead and code size will
+decrease.  How does a Guile with the contributions of this paper compare
+to one without?
+
+### Compile time
+
+Higher per-node bookkeeping for the CSE pass, but less residual code due
+to eager elision of dead code; how does it pan out in practice?  Memory
+would also be nice to look at but this is harder to measure.
+
+### Microbenchmarks
+
+Do the compiled sizes of the Gabriel benchmarks change with this pass?
+Why / why not?  Speed?
+
+### Synthetic benchmarks
+
+Speedup for synthetic benchmarks
+
+### Limitations
+
+Semantics of match macros being conjunctions doesn't fully detangle
+control flow; e.g. the args list of $primcall patterns in
+compile-bytecode
 
 ## SSA discussion
 
