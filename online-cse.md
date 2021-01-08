@@ -859,10 +859,12 @@ Rapid Case Dispatch in Scheme
 
   http://scheme2006.cs.uchicago.edu/07-clinger.pdf
 
-ref: Donald Knuth. An empirical study of FORTRAN programs.
-Software Practice and Experience, 1(12):105–134, 1974.
+## References
 
-ref: Matthew S. Hecht and Jeffrey D. Ullman. Analysis of a simple
-algorithm for global flow problems.  In Conference Record of the First
-Annual ACM Symposium on Principles of Programming Languages, Boston
-(Mass.), pages 207–217, October 1973.
+Donald Knuth. An empirical study of FORTRAN programs.  Software Practice
+and Experience, 1(12):105–134, 1974.
+
+Matthew S. Hecht and Jeffrey D. Ullman. Analysis of a simple algorithm
+for global flow problems.  In Conference Record of the First Annual ACM
+Symposium on Principles of Programming Languages, Boston (Mass.), pages
+207–217, October 1973.
