@@ -11,7 +11,7 @@ guile-3.0.5.tar.lz:
 guile-src-%: guile-3.0.5.tar.lz
 	$(ENV) tar xvf guile-3.0.5.tar.lz
 	$(ENV) mv guile-3.0.5 $@
-	$(ENV) bash -c 'if test -f $*.patch; then cd $@ && patch -u -p1 ../$*.patch; fi'
+	$(ENV) bash -c 'if test -f $*.patch; then cd $@ && patch -u -p1 < ../$*.patch; fi'
 
 guile-bin-%: guile-src-%
 	$(ENV) bash -c 'cd $< && ./configure'
