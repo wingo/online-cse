@@ -1,0 +1,21 @@
+(use-modules (ice-9 pretty-print))
+(use-modules (ice-9 match))
+
+(define (make-test n)
+  `(define (dispatch x)
+     (define-syntax-rule (box? x) (variable? x))
+     (define-syntax-rule (box-ref x) (variable-ref x))
+     (define-syntax-rule (box-of-box-of? x i)
+       (and (box? x)
+            (let ((y (box-ref x)))
+              (and (box? y)
+                   (let ((z (box-ref y)))
+                     (eq? z i))))))
+     (cond
+      ,@(map (lambda (i)
+               `((box-of-box-of? x ,i) ,i))
+             (iota n)))))
+
+(when (batch-mode?)
+  (match (program-arguments)
+    ((_ n) (pretty-print (make-test (string->number n))))))
