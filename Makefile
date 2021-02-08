@@ -30,8 +30,4 @@ test-%.scm: make-test.scm guile-bin-online-cse
 # time to compile test-N.scm for each; proxy for memory
 # expected run-time for dispatching N/2
 
-code-size-comparison.csv: guile-bin-no-online-cse guile-bin-online-cse compare-code-sizes.scm
-	$(ENV) ./guile-bin-online-cse compare-code-sizes.scm \
-	   guile-src-no-online-cse/module guile-src-online-cse/module > $@
-
 .PRECIOUS: guile-src-% guile-bin-%
