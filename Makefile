@@ -9,8 +9,7 @@ guile-3.0.5.tar.lz:
 	$(ENV) sha256sum -c guile-3.0.5.tar.lz.checksum
 
 guile-src-%: guile-3.0.5.tar.lz
-	$(ENV) tar xvf guile-3.0.5.tar.lz
-	$(ENV) mv guile-3.0.5 $@
+	$(ENV) bash -c 'mkdir $@-tmp && cd $@-tmp && tar xvf ../$< && mv $(subst .tar.lz,,$<) ../$@'
 	$(ENV) bash -c 'if test -f $*.patch; then cd $@ && patch -u -p1 < ../$*.patch; fi'
 
 guile-bin-%: guile-src-%
@@ -29,5 +28,11 @@ test-%.scm: make-test.scm guile-bin-online-cse
 
 # time to compile test-N.scm for each; proxy for memory
 # expected run-time for dispatching N/2
+
+clean:
+	rm -rf guile-src-online-cse guile-src-no-online-cse
+	rm -f guile-3.0.5.tar.lz
+	rm -f guile-bin-online-cse guile-bin-no-online-cse
+	rm -f code-size-comparison.csv $(foreach size,$(sizes),test$(size).scm)
 
 .PRECIOUS: guile-src-% guile-bin-%
