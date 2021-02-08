@@ -12,12 +12,13 @@ guile-src-%: guile-3.0.5.tar.lz
 	$(ENV) bash -c 'mkdir $@-tmp && cd $@-tmp && tar xvf ../$< && mv $(subst .tar.lz,,$<) ../$@'
 	$(ENV) rmdir $@-tmp
 	$(ENV) bash -c 'if test -f $*.patch; then cd $@ && patch -u -p1 < ../$*.patch; fi'
+	$(ENV) touch $@
 
 guile-bin-%: guile-src-%
 	$(ENV) bash -c 'cd $< && ./configure'
 	$(ENV) make -C $< $(MAKEFLAGS)
-	$(ENV) rm -f $@
-	$(ENV) ln -s $</meta/guile $@
+	$(ENV) ln -sf $</meta/guile $@
+	$(ENV) touch $@
 
 code-size-comparison.csv: guile-bin-no-online-cse guile-bin-online-cse compare-code-sizes.scm
 	$(ENV) ./guile-bin-online-cse compare-code-sizes.scm \
