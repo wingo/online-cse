@@ -12,22 +12,26 @@ guile-src-%: guile-3.0.5.tar.lz
 	$(ENV) bash -c 'mkdir $@-tmp && cd $@-tmp && tar xvf ../$< && mv $(subst .tar.lz,,$<) ../$@'
 	$(ENV) rmdir $@-tmp
 	$(ENV) bash -c 'if test -f $*.patch; then cd $@ && patch -u -p1 < ../$*.patch; fi'
-	$(ENV) touch $@
 
-guile-bin-%: guile-src-%
-	$(ENV) bash -c 'cd $< && ./configure'
-	$(ENV) make -C $< $(MAKEFLAGS)
-	$(ENV) ln -sf $</meta/guile $@
-	$(ENV) touch $@
+guile-build-%/meta/guile: guile-src-%
+	$(ENV) mkdir guile-build-$*
+	$(ENV) bash -c 'cd guile-build-$* && ../$</configure'
+	$(ENV) make -C guile-build-$* $(MAKEFLAGS)
 
-code-size-comparison.csv: guile-bin-no-online-cse guile-bin-online-cse compare-code-sizes.scm
-	$(ENV) ./guile-bin-online-cse compare-code-sizes.scm \
-	   guile-src-no-online-cse/module guile-src-online-cse/module > $@
+variants=online-cse no-online-cse
+guile_src_dirs=$(foreach variant,$(variants),guile-src-$(variant))
+guile_build_dirs=$(foreach variant,$(variants),guile-build-$(variant))
+guiles=$(foreach build_dir,$(guile_build_dirs),$(build_dir)/meta/guile)
+guile=$(firstword $(guiles))
+
+code-size-comparison.csv: $(guiles) compare-code-sizes.scm
+	$(ENV) $(guile) compare-code-sizes.scm \
+	   guile-build-no-online-cse/module guile-build-online-cse/module > $@
 
 sizes=256 512 1024 2048 4096 8192 16384 32768 65536 131072
 tests=$(foreach size,$(sizes),test-$(size).scm)
-test-%.scm: make-test.scm guile-bin-online-cse
-	$(ENV) ./guile-bin-online-cse make-test.scm $* > $@
+test-%.scm: make-test.scm $(guile)
+	$(ENV) $(guile) make-test.scm $* > $@
 
 tests: $(tests)
 
@@ -35,9 +39,8 @@ tests: $(tests)
 # expected run-time for dispatching N/2
 
 clean:
-	rm -rf guile-src-online-cse guile-src-no-online-cse
 	rm -f guile-3.0.5.tar.lz
-	rm -f guile-bin-online-cse guile-bin-no-online-cse
+	rm -rf $(guile_src_dirs) $(guile_build_dirs)
 	rm -f code-size-comparison.csv $(tests)
 
 .PRECIOUS: guile-src-% guile-bin-%
